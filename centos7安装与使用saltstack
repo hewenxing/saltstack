@@ -1,0 +1,107 @@
+从saltstack存储库安装
+rpm --import https://repo.saltstack.com/yum/redhat/7/x86_64/latest/SALTSTACK-GPG-KEY.pub
+
+vim /etc/yum.repos.d/saltstack.repo
+[saltstack-repo]
+name=SaltStack repo for Red Hat Enterprise Linux $releasever
+baseurl=https://repo.saltstack.com/yum/redhat/$releasever/$basearch/latest
+enabled=1
+gpgcheck=1
+gpgkey=https://repo.saltstack.com/yum/redhat/$releasever/$basearch/latest/SALTSTACK-GPG-KEY.pub
+       https://repo.saltstack.com/yum/redhat/$releasever/$basearch/latest/base/RPM-GPG-KEY-CentOS-7
+
+sudo yum clean expire-cache
+sudo yum update -y
+yum install salt-master salt-minion salt-ssh salt-syndic salt-cloud -y
+
+启动
+systemctl start salt-master.service
+systemctl enable salt-master.service
+systemctl start salt-minion.service
+systemctl enable salt-minion.service
+
+Ubuntu 14安装saltstack
+wget -O - https://repo.saltstack.com/apt/ubuntu/14.04/amd64/latest/SALTSTACK-GPG-KEY.pub | sudo apt-key add -
+deb http://repo.saltstack.com/apt/ubuntu/14.04/amd64/latest trusty main
+sudo apt-get update
+
+配置saltstack 
+master配置    #https://docs.saltstack.cn/ref/configuration/master.html#id1
+默认Salt master监听所有网卡接口(0.0.0.0)的4505和4506端口. 如果需要指定监听IP, 通过 /etc/salt/master 配置文件中的"interface"指令进行如下修改:
+- #interface: 0.0.0.0
++ interface: 10.0.0.1
+
+提供服务的端口
+publish_port: 4505
+
+
+minion配置    https://docs.saltstack.cn/ref/configuration/minion.html
+如果DNS名为"salt"并不能解析到本地正确的Master地址，需要通过如下方法修改 /etc/salt/minion 配置文件中的"master"指令:
+- #master: salt
++ master: 10.0.0.1
++ id: 10.0.0.1
+
+启用多主模式
+master:
+  - address1
+  - address2
+
+动态配置主服务器,如果需要通过执行函数而不是读取静态主值来动态分配主控，请将其设置为func
+master: module.function
+master_type: func
+
+不使用多主模式，可以将minion配置为使用主地址列表作为故障转移列表，尝试第一个地址，然后尝试第二个等，直到minion成功连接。要启用此行为，请设置master_type为 failover：
+master:
+  - address1
+  - address2
+master_type: failover
+
+配置minion将以秒为单位验证当前主人是否存活并响应的频率。如果minion发现现有的master已经死了，它将尝试与列表中的下一个master建立连接。
+master_alive_interval: 30
+
+saltstack配置文件示例
+https://docs.saltstack.cn/ref/configuration/examples.html
+
+
+关键身份
+master指纹
+通过在Salt master上运行以下命令来打印主密钥指纹：
+master.pub从“ 本地密钥”部分复制指纹，然后将此值设置为master_fingerminion配置文件中的值。保存配置文件，然后重新启动Salt minion。
+salt-key -F master
+
+minion指纹
+在每个Salt minion上运行以下命令以查看minion密钥指纹：
+将此值与在Salt master上运行命令时显示的值进行比较 。salt-key --finger <MINION_ID>
+salt-call --local key.finger
+
+KEY管理
+salt-key -L     #在发送给Minion之前，需要确保minion的key已经被Master所接受. 运行 ``salt-key``命令将列出Salt Master已知的所有keys.
+salt-key -A     #接受key以使Mionions可以被Master管控，需要使用 salt-key 命令
+salt-key -a keyname    #接受单个key使用小写字母a
+
+测试
+salt <id> test.ping
+salt '*' test.ping
+salt -E 'virtmach[0-9]' test.ping    #可以使用正则表达式
+
+对minion分组
+vim /etc/salt/master.d/nodegroup.conf 
+nodegroups:
+ test1: 'id'
+salt -N test1 test.ping
+
+
+为salt开启防火墙配置/centos7
+firewall-cmd --permanent --zone=<zone> --add-port=4505-4506/tcp
+firewall-cmd --reload
+
+saltstack命令  https://docs.saltstack.cn/ref/cli/index.html
+salt '*' grains.items  #列出主机的详细信息
+salt '*' grains.item os  #列出所有主机的系统版本
+salt '*' grains.item fqdn_ip4  #列出所有主机的IP地址
+salt -G 'os:Centos' test.ping  #所有主机系统为centos版本ping测试
+salt '*' grains.item roles   #获取所有主机的roles
+salt -G 'roles:apache' cmd.run 'systemctl restart httpd'   #所有主机roles为apache的执行命令systemctl restart httpd
+salt '*' grains.item cloud   #获取所有主机的cloud
+salt-run manage.status   #查看所有minion状态
+salt '*' cmd.run 'uname -a'   #运行一个任意的shell命令
